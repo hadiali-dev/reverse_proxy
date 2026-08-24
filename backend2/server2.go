@@ -8,7 +8,7 @@ import (
 	func main() {
 
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprint(w, "Hello from port 9001")
+			fmt.Fprint(w, "Hello from port 9002")
 		})
-		http.ListenAndServe(":9001", nil)
+		http.ListenAndServe(":9002", nil)
 	}

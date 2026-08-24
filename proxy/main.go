@@ -4,16 +4,29 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
 type ProxyHandler struct {
-	TargetUrl string
+	Pool	  *Pool
+}
+type Backend struct{
+	URL string
+}
+type Pool struct{
+	Backends []*Backend
+	counter uint64
 }
 
+func (p *Pool) NextBackend() *Backend {
+    n := atomic.AddUint64(&p.counter, 1)
+    idx := n % uint64(len(p.Backends))
+    return p.Backends[idx]
+}
 func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
-	req, err := http.NewRequest(r.Method, p.TargetUrl+r.URL.RequestURI(), r.Body)
+nextBackend := p.Pool.NextBackend()
+	req, err := http.NewRequest(r.Method, nextBackend.URL+r.URL.RequestURI(), r.Body)
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
@@ -47,7 +60,7 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		req.Header.Set("X-Forwarded-Proto", "http")
 	}
 
-	req.Host = p.TargetUrl
+	req.Host = nextBackend.URL
 	Client := &http.Client{Timeout: 15*time.Second}
 	res, err := Client.Do(req)
 	if err != nil {

@@ -7,5 +7,12 @@ import (
 )
 
 func main() {
-	http.ListenAndServe(":8080", &proxy.ProxyHandler{TargetUrl: "http://localhost:9001"})
+	http.ListenAndServe(":8080", &proxy.ProxyHandler{
+	Pool: &proxy.Pool{
+	Backends: []*proxy.Backend{
+		{URL: "http://localhost:9001"},
+		{URL: "http://localhost:9002"},
+	},
+	},
+})
 }
