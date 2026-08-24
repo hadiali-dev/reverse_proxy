@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -13,19 +14,46 @@ type ProxyHandler struct {
 }
 type Backend struct{
 	URL string
+	Alive bool
+mu sync.RWMutex
 }
 type Pool struct{
 	Backends []*Backend
 	counter uint64
 }
+func (b *Backend) SetAlive(alive bool) {
+    b.mu.Lock()
+    defer b.mu.Unlock()
+    b.Alive = alive
+}
+
+func (b *Backend) IsAlive() bool {
+    b.mu.RLock()
+    defer b.mu.RUnlock()
+    return b.Alive
+}
 
 func (p *Pool) NextBackend() *Backend {
+var livebackend[]*Backend
+ for _ ,val :=range p.Backends{
+if val.IsAlive(){
+livebackend=append(livebackend,val)
+}
+
+} 
+if len(livebackend) == 0 {
+		return nil 
+	}
     n := atomic.AddUint64(&p.counter, 1)
-    idx := n % uint64(len(p.Backends))
-    return p.Backends[idx]
+    idx := n % uint64(len(livebackend))
+    return livebackend[idx]
 }
 func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 nextBackend := p.Pool.NextBackend()
+if nextBackend==nil{
+http.Error(w, "Service Unavailable: No server alive", http.StatusServiceUnavailable)
+return
+}
 	req, err := http.NewRequest(r.Method, nextBackend.URL+r.URL.RequestURI(), r.Body)
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
@@ -64,6 +92,7 @@ nextBackend := p.Pool.NextBackend()
 	Client := &http.Client{Timeout: 15*time.Second}
 	res, err := Client.Do(req)
 	if err != nil {
+nextBackend.SetAlive(false)
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
