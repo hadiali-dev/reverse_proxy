@@ -1,59 +1,26 @@
 package proxy
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"sync"
-	"sync/atomic"
 	"time"
 )
 
-type ProxyHandler struct {
-	Pool	  *Pool
-}
-type Backend struct{
-	URL string
-	Alive bool
-mu sync.RWMutex
-}
-type Pool struct{
-	Backends []*Backend
-	counter uint64
-}
-func (b *Backend) SetAlive(alive bool) {
-    b.mu.Lock()
-    defer b.mu.Unlock()
-    b.Alive = alive
-}
-
-func (b *Backend) IsAlive() bool {
-    b.mu.RLock()
-    defer b.mu.RUnlock()
-    return b.Alive
-}
-
-func (p *Pool) NextBackend() *Backend {
-var livebackend[]*Backend
- for _ ,val :=range p.Backends{
-if val.IsAlive(){
-livebackend=append(livebackend,val)
-}
-
-} 
-if len(livebackend) == 0 {
-		return nil 
-	}
-    n := atomic.AddUint64(&p.counter, 1)
-    idx := n % uint64(len(livebackend))
-    return livebackend[idx]
-}
 func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 nextBackend := p.Pool.NextBackend()
+
 if nextBackend==nil{
 http.Error(w, "Service Unavailable: No server alive", http.StatusServiceUnavailable)
 return
 }
+nextBackend.AddLiveConnections()
+fmt.Println(nextBackend.LiveConnections)
+defer func(){
+ nextBackend.DelLiveConnection()
+fmt.Println(nextBackend.LiveConnections)
+}()
 	req, err := http.NewRequest(r.Method, nextBackend.URL+r.URL.RequestURI(), r.Body)
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
@@ -70,7 +37,7 @@ return
 	req.Header.Del("Trailer")
 	req.Header.Del("Proxy-Authenticate")
 	req.Header.Del("Proxy-Authorization")
-	// 1. Get the immediate sender's IP (strip the port)
+	// 1. Get the immediate sender IP (strip the port)
 	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 
 	// 2. Check if the header already has data
@@ -96,7 +63,11 @@ nextBackend.SetAlive(false)
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
-	defer res.Body.Close()
+defer func(){
+defer res.Body.Close()
+
+}()
+	
 	//Delete Headers from the backend response that should not be sent to the client
 
 	res.Header.Del("Keep-Alive")
