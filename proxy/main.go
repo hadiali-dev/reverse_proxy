@@ -1,30 +1,18 @@
 package proxy
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"time"
 )
 
-func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-nextBackend := p.Pool.NextBackend()
+var httpClient = &http.Client{Timeout: 15 * time.Second}
 
-if nextBackend==nil{
-http.Error(w, "Service Unavailable: No server alive", http.StatusServiceUnavailable)
-return
-}
-nextBackend.AddLiveConnections()
-fmt.Println(nextBackend.LiveConnections)
-defer func(){
- nextBackend.DelLiveConnection()
-fmt.Println(nextBackend.LiveConnections)
-}()
-	req, err := http.NewRequest(r.Method, nextBackend.URL+r.URL.RequestURI(), r.Body)
+func sendRequest(backend *Backend, r *http.Request) (*http.Response, error) {
+	req, err := http.NewRequest(r.Method, backend.URL+r.URL.RequestURI(), r.Body)
 	if err != nil {
-		http.Error(w, "Failed to create request", http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	req.Header = r.Header.Clone()
 
@@ -37,16 +25,15 @@ fmt.Println(nextBackend.LiveConnections)
 	req.Header.Del("Trailer")
 	req.Header.Del("Proxy-Authenticate")
 	req.Header.Del("Proxy-Authorization")
+
 	// 1. Get the immediate sender IP (strip the port)
 	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 
 	// 2. Check if the header already has data
 	existingXFF := r.Header.Get("X-Forwarded-For")
-
 	if existingXFF != "" {
 		req.Header.Set("X-Forwarded-For", existingXFF+", "+clientIP)
 	} else {
-		// If it's empty, just set it to the client IP
 		req.Header.Set("X-Forwarded-For", clientIP)
 	}
 	if r.TLS != nil {
@@ -55,21 +42,45 @@ fmt.Println(nextBackend.LiveConnections)
 		req.Header.Set("X-Forwarded-Proto", "http")
 	}
 
-	req.Host = nextBackend.URL
-	Client := &http.Client{Timeout: 15*time.Second}
-	res, err := Client.Do(req)
-	if err != nil {
-nextBackend.SetAlive(false)
-		http.Error(w, "bad gateway", http.StatusBadGateway)
+	req.Host = backend.URL
+	return httpClient.Do(req)
+}
+
+func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	backend := p.Pool.NextBackend()
+	if backend == nil {
+		http.Error(w, "Service Unavailable: No server alive", http.StatusServiceUnavailable)
 		return
 	}
-defer func(){
-defer res.Body.Close()
+	backend.AddLiveConnections()
+	defer backend.DelLiveConnection()
 
-}()
-	
+	res, err := sendRequest(backend, r)
+	if err != nil {
+		backend.RecordFailure()
+
+		if r.Method == "GET" || r.Method == "HEAD" {
+			retryBackend := p.Pool.NextBackendExcluding(backend)
+			if retryBackend != nil {
+				retryBackend.AddLiveConnections()
+				defer retryBackend.DelLiveConnection()
+
+				res, err = sendRequest(retryBackend, r)
+				backend = retryBackend
+			}
+		}
+
+		if err != nil {
+			backend.RecordFailure()
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
+		}
+	}
+	defer res.Body.Close()
+
+	backend.RecordSuccess()
+
 	//Delete Headers from the backend response that should not be sent to the client
-
 	res.Header.Del("Keep-Alive")
 	res.Header.Del("Connection")
 	res.Header.Del("Transfer-Encoding")
@@ -88,5 +99,4 @@ defer res.Body.Close()
 		http.Error(w, "Failed to read response", http.StatusInternalServerError)
 		return
 	}
-
 }
