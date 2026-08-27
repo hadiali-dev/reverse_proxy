@@ -1,2 +1,4 @@
 go.mod
 doc.md
+key.pem
+cert.pem
