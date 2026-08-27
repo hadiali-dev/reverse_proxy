@@ -19,13 +19,15 @@ func (b *Backend) HealthCheck() {
         b.SetAlive(false)
     }
 }
-func(p *Pool) StartHealthChecks(){
-for _,b:=range p.Backends{
-b.HealthCheck()}
-Ticker:=time.NewTicker(5*time.Second)
-defer Ticker.Stop()
-for range Ticker.C{
-for _,b:=range p.Backends{
-b.HealthCheck()}
-}
+func (p *Pool) StartHealthChecks(interval time.Duration) {
+    for _, b := range p.Backends {
+        b.HealthCheck()
+    }
+    ticker := time.NewTicker(interval)
+    defer ticker.Stop()
+    for range ticker.C {
+        for _, b := range p.Backends {
+            b.HealthCheck()
+        }
+    }
 }

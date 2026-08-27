@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -47,8 +48,11 @@ func sendRequest(backend *Backend, r *http.Request) (*http.Response, error) {
 }
 
 func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
 	backend := p.Pool.NextBackend()
 	if backend == nil {
+		slog.Warn("no backend available", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "Service Unavailable: No server alive", http.StatusServiceUnavailable)
 		return
 	}
@@ -72,6 +76,7 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil {
 			backend.RecordFailure()
+			slog.Error("backend request failed", "method", r.Method, "path", r.URL.Path, "backend", backend.URL, "duration_ms", time.Since(start).Milliseconds())
 			http.Error(w, "bad gateway", http.StatusBadGateway)
 			return
 		}
@@ -80,7 +85,6 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	backend.RecordSuccess()
 
-	//Delete Headers from the backend response that should not be sent to the client
 	res.Header.Del("Keep-Alive")
 	res.Header.Del("Connection")
 	res.Header.Del("Transfer-Encoding")
@@ -96,7 +100,16 @@ func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(res.StatusCode)
 	_, err = io.Copy(w, res.Body)
 	if err != nil {
+		slog.Error("failed writing response to client", "error", err)
 		http.Error(w, "Failed to read response", http.StatusInternalServerError)
 		return
 	}
+
+	slog.Info("request handled",
+		"method", r.Method,
+		"path", r.URL.Path,
+		"backend", backend.URL,
+		"status", res.StatusCode,
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
 }

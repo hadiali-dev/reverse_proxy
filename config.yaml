@@ -1,0 +1,9 @@
+# Test Configuration for Reverse Proxy / Load Balancer
+listen_addr: ":8080"
+strategy: "round_robin"
+health_check_interval_seconds: 5
+
+backends:
+  - url: "http://localhost:9001"
+  - url: "http://localhost:9002"
+
