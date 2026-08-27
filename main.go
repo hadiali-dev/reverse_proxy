@@ -40,5 +40,5 @@ mux.Handle("/status", &proxy.StatusHandler{Pool: pool})
 mux.Handle("/", &proxy.ProxyHandler{Pool: pool})
 
 slog.Info("proxy listening", "addr", cfg.ListenAddr)
-log.Fatal(http.ListenAndServe(cfg.ListenAddr, mux))
+log.Fatal(http.ListenAndServeTLS(cfg.ListenAddr, "cert.pem", "key.pem", mux))
 }
