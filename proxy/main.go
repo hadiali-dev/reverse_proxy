@@ -15,19 +15,7 @@ func sendRequest(backend *Backend, r *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header = r.Header.Clone()
-
-	req.Header.Del("Keep-Alive")
-	req.Header.Del("Connection")
-	req.Header.Del("Transfer-Encoding")
-	req.Header.Del("Upgrade")
-	req.Header.Del("Proxy-Connection")
-	req.Header.Del("TE")
-	req.Header.Del("Trailer")
-	req.Header.Del("Proxy-Authenticate")
-	req.Header.Del("Proxy-Authorization")
-
-	// 1. Get the immediate sender IP (strip the port)
+// 1. Get the immediate sender IP (strip the port)
 	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 
 	// 2. Check if the header already has data
@@ -43,13 +31,30 @@ func sendRequest(backend *Backend, r *http.Request) (*http.Response, error) {
 		req.Header.Set("X-Forwarded-Proto", "http")
 	}
 
+	req.Header = r.Header.Clone()
+
+	req.Header.Del("Keep-Alive")
+	req.Header.Del("Connection")
+	req.Header.Del("Transfer-Encoding")
+	req.Header.Del("Upgrade")
+	req.Header.Del("Proxy-Connection")
+	req.Header.Del("TE")
+	req.Header.Del("Trailer")
+	req.Header.Del("Proxy-Authenticate")
+	req.Header.Del("Proxy-Authorization")
+
+	
 	req.Host = backend.URL
 	return httpClient.Do(req)
 }
 
 func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-
+clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if !p.RateLimiter.Allow(clientIP) {
+		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		return
+	}
 	backend := p.Pool.NextBackend()
 	if backend == nil {
 		slog.Warn("no backend available", "method", r.Method, "path", r.URL.Path)

@@ -10,8 +10,12 @@ type Config struct {
     Strategy   string `yaml:"strategy"`
     HealthCheckIntervalSeconds int `yaml:"health_check_interval_seconds"`
     Backends   []BackendConfig `yaml:"backends"`
+	RateLimit       RateLimitConfig `yaml:"rate_limit"`
 }
-
+type RateLimitConfig struct {
+    MaxTokens  float64 `yaml:"max_tokens"`
+    RefillRate float64 `yaml:"refill_rate"`
+}
 type BackendConfig struct {
     URL string `yaml:"url"`
 }

@@ -23,6 +23,7 @@ func main() {
 		backends = append(backends, &proxy.Backend{URL: bc.URL})
 	}
 
+ratelimiter:=proxy.NewRateLimiter(cfg.RateLimit)
 	var strategy proxy.Strategy
 	switch cfg.Strategy {
 	case "round_robin":
@@ -42,7 +43,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/status", &proxy.StatusHandler{Pool: pool})
-	mux.Handle("/", &proxy.ProxyHandler{Pool: pool})
+	mux.Handle("/", &proxy.ProxyHandler{Pool: pool, RateLimiter: ratelimiter})
 
 	srv := &http.Server{
 		Addr:    cfg.ListenAddr,

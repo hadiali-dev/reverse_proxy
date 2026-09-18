@@ -3,12 +3,20 @@ package proxy
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type ProxyHandler struct {
 	Pool *Pool
+	RateLimiter *RateLimiter
 }
-
+type TokenBucket struct{
+CurrentTokens float64 
+LastRefillTime time.Time
+MaxTokens float64
+RefillRate float64 
+mu sync.Mutex
+}
 type Backend struct {
 	URL             string
 	mu              sync.RWMutex
@@ -17,7 +25,65 @@ type Backend struct {
 	failCount       int
 	LiveConnections int64
 }
+type RateLimiter struct {
+	mu       sync.Mutex
+	buckets  map[string]*TokenBucket
+	maxTokens  float64
+	refillRate float64
+}
 
+func (tb *TokenBucket) Allow() bool {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	// 1. Refill first — calculate how many tokens should have
+	//    accumulated since the last time we touched this bucket.
+	now := time.Now()
+	elapsed := now.Sub(tb.LastRefillTime)
+	tokensToAdd := elapsed.Seconds() * tb.RefillRate
+
+	tb.CurrentTokens = min(tb.MaxTokens, tb.CurrentTokens+tokensToAdd)
+	tb.LastRefillTime = now
+
+	// 2. Check — is there at least one full token available?
+	if tb.CurrentTokens < 1 {
+		return false
+	}
+
+	// 3. Decrement and allow.
+	tb.CurrentTokens--
+	return true
+}
+
+func NewRateLimiter(cfg RateLimitConfig) *RateLimiter {
+	return &RateLimiter{
+		buckets:    make(map[string]*TokenBucket),
+		maxTokens:  cfg.MaxTokens,
+		refillRate: cfg.RefillRate,
+	}
+}
+
+func (rl *RateLimiter) getBucket(clientIP string) *TokenBucket {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	bucket, exists := rl.buckets[clientIP]
+	if !exists {
+		bucket = &TokenBucket{
+			CurrentTokens:  rl.maxTokens,
+			MaxTokens:      rl.maxTokens,
+			RefillRate:     rl.refillRate,
+			LastRefillTime: time.Now(),
+		}
+		rl.buckets[clientIP] = bucket
+	}
+	return bucket
+}
+
+func (rl *RateLimiter) Allow(clientIP string) bool {
+	bucket := rl.getBucket(clientIP)
+	return bucket.Allow()
+}
 // --- Alive ---
 
 func (b *Backend) SetAlive(alive bool) {
